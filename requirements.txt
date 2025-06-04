@@ -13,4 +13,5 @@ pydub==0.25.1
 websocket-client==1.6.4
 g711==0.1.0
 sounddevice>=0.5.2
-numpy>=2.2.0 
+numpy>=2.2.0
+certifi>=2023.7.22 
