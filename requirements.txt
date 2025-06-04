@@ -1,0 +1,16 @@
+fastapi>=0.115.0
+uvicorn>=0.34.0
+python-dotenv>=1.0.0
+websockets>=11.0.0
+aiohttp>=3.12.0
+httpx==0.25.0
+requests==2.31.0
+pydantic>=2.11.0
+pydantic-settings>=2.9.0
+pytest==7.4.2
+python-multipart==0.0.6
+pydub==0.25.1
+websocket-client==1.6.4
+g711==0.1.0
+sounddevice>=0.5.2
+numpy>=2.2.0 
