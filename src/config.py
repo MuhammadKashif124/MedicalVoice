@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     input_audio_format: str = "g711_ulaw"
     output_audio_format: str = "g711_ulaw"
     
+    # OpenAI VAD (Voice Activity Detection) settings
+    openai_vad_enable: bool = True
+    openai_vad_silence_duration_ms: int = 700  # Milliseconds of silence to detect speech stop
+    openai_vad_prefix_padding_ms: int = 200    # Milliseconds of audio to include before VAD detected speech
+    openai_vad_threshold: float = 0.5          # VAD activation threshold (0.0-1.0)
+    
     # AI behavior configuration
     system_instructions: str = """
         You are MedicalVoice, an AI assistant specializing in medical billing and insurance questions.

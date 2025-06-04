@@ -130,21 +130,37 @@ class OpenAIRealtimeClient:
             logger.error("Cannot update session: WebSocket not connected")
             return
         
-        session_config = {
-            "type": "session.update",
-            "session": {
-                "voice": self.settings.openai_voice,
-                "instructions": self.settings.system_instructions,
-                "input_audio_format": self.settings.input_audio_format,
-                "output_audio_format": self.settings.output_audio_format
-            }
+        session_data = {
+            "voice": self.settings.openai_voice,
+            "instructions": self.settings.system_instructions,
+            "input_audio_format": self.settings.input_audio_format,
+            "output_audio_format": self.settings.output_audio_format
         }
-        
+
+        if self.settings.openai_vad_enable:
+            session_data["turn_detection"] = {
+                "type": "server_vad",
+                "silence_duration_ms": self.settings.openai_vad_silence_duration_ms,
+                "prefix_padding_ms": self.settings.openai_vad_prefix_padding_ms,
+                "threshold": self.settings.openai_vad_threshold
+            }
+        else:
+            # If VAD is disabled, we might want to set turn_detection to None or a client-driven mode
+            # For now, let's assume if not enabled, we don't send the turn_detection field,
+            # which means OpenAI will use its defaults (likely server VAD with default params).
+            # Or, explicitly: session_data["turn_detection"] = None
+            pass # Default behavior if not specified is server_vad with default params
+
         # Add tools if provided
         if tools:
-            session_config["session"]["tools"] = tools
+            session_data["tools"] = tools
             
-        self.ws.send(json.dumps(session_config))
+        session_config_event = {
+            "type": "session.update",
+            "session": session_data
+        }
+            
+        self.ws.send(json.dumps(session_config_event))
         logger.info("Sent session configuration to OpenAI")
     
     async def send_audio(self, audio_data: bytes):
@@ -189,7 +205,7 @@ class OpenAIRealtimeClient:
             logger.error(f"Cannot send function result: No call_id found for function {function_name}")
             return
         
-        function_result = {
+        function_result_event = {
             "type": "conversation.item.create",
             "item": {
                 "type": "function_call_output",
@@ -198,13 +214,28 @@ class OpenAIRealtimeClient:
             }
         }
         
-        self.ws.send(json.dumps(function_result))
+        self.ws.send(json.dumps(function_result_event))
         logger.info(f"Sent function result for {function_name} with call_id {call_id}")
         
         # Remove from active function calls
         if call_id in self.active_function_calls:
             del self.active_function_calls[call_id]
-    
+
+        # After sending function result, ask the model to respond
+        await self.create_response()
+
+    async def create_response(self):
+        """Instructs OpenAI to generate a response."""
+        if not self.ws or not self.connected:
+            logger.error("Cannot create response: WebSocket not connected")
+            return
+        
+        response_create_event = {
+            "type": "response.create"
+        }
+        self.ws.send(json.dumps(response_create_event))
+        logger.info("Sent response.create event to OpenAI")
+
     async def close(self):
         """Close the WebSocket connection"""
         if self.ws and self.connected:

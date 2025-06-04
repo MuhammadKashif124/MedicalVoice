@@ -68,7 +68,7 @@ class AudioProcessor:
         self.output_queue = queue.Queue()
         self.is_active = False
         self.stream = None
-        self.silent_frames = 0
+        self.silent_frames_for_detection = 0
         self.event = threading.Event()
         
         # Check audio devices
@@ -86,19 +86,8 @@ class AudioProcessor:
         if status:
             logger.warning(f"Audio callback status: {status}")
             
-        # Process input: check for silence and queue the data
+        # Process input: directly queue the data
         try:
-            is_silent = self._is_silent(indata)
-            if is_silent:
-                self.silent_frames += 1
-                if self.silent_frames > MAX_SILENCE_FRAMES:
-                    # End of speech detected, send special marker
-                    self.input_queue.put(None)
-                    self.silent_frames = 0
-            else:
-                self.silent_frames = 0
-                
-            # Always queue the input data for processing
             self.input_queue.put(indata.copy())
             
             # Process output: get data from the queue or generate silence
@@ -113,20 +102,23 @@ class AudioProcessor:
             logger.error(f"Error in audio callback: {str(e)}")
             outdata.fill(0)  # Always provide silence in case of error
     
-    def _is_silent(self, audio_data):
-        """Check if the audio chunk is silent"""
-        # Check for invalid values to avoid sqrt warnings
-        if np.any(np.isnan(audio_data)) or np.all(audio_data == 0):
+    def _is_silent(self, audio_data_bytes: bytes) -> bool:
+        """Check if the audio chunk (bytes) is silent."""
+        if not audio_data_bytes:
             return True
-            
-        # Calculate RMS with try/except to handle any numerical issues
         try:
+            audio_array = np.frombuffer(audio_data_bytes, dtype=DTYPE)
+            # Check for invalid values to avoid sqrt warnings
+            if np.any(np.isnan(audio_array)) or np.all(audio_array == 0):
+                return True
+            
+            # Calculate RMS with try/except to handle any numerical issues
             # Convert to float64 to avoid numerical issues
-            audio_float = audio_data.astype(np.float64)
+            audio_float = audio_array.astype(np.float64)
             # Use safe operations to avoid warnings
             squared = np.square(audio_float)
             mean_squared = np.mean(squared)
-            if mean_squared <= 0:
+            if mean_squared <= 0: # Should ideally be a very small epsilon for float comparison
                 return True
             rms = np.sqrt(mean_squared)
             return rms < SILENCE_THRESHOLD
@@ -184,16 +176,31 @@ class AudioProcessor:
         logger.info("Stopped audio stream")
     
     def get_audio_chunk(self) -> Optional[bytes]:
-        """Get a chunk of audio from the input queue"""
+        """Get a chunk of audio from the input queue.
+        Performs silence detection here instead of the callback.
+        Returns None if prolonged silence (end of speech) is detected.
+        Returns b'' if the queue is empty but not end-of-speech.
+        Returns audio bytes otherwise.
+        """
         try:
-            data = self.input_queue.get_nowait()
-            # If None, it's an end-of-speech marker
-            if data is None:
-                return None
-            # Convert numpy array to bytes
-            return data.tobytes()
+            data_array = self.input_queue.get_nowait() # This is a numpy array
+            
+            # Convert numpy array to bytes for silence detection and return
+            audio_bytes = data_array.tobytes()
+
+            if self._is_silent(audio_bytes):
+                self.silent_frames_for_detection += 1
+                if self.silent_frames_for_detection > MAX_SILENCE_FRAMES:
+                    self.silent_frames_for_detection = 0 # Reset for next speech
+                    logger.debug("Silence detected by AudioProcessor.get_audio_chunk, signaling end of speech.")
+                    return None # Signal end of speech
+            else:
+                self.silent_frames_for_detection = 0
+            
+            return audio_bytes
+            
         except queue.Empty:
-            return b''
+            return b'' # Queue is empty, no new audio yet
     
     def play_audio(self, audio_data: bytes):
         """Queue audio data for playback"""
